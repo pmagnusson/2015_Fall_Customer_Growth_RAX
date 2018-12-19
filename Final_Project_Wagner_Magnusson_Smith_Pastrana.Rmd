@@ -1,0 +1,1187 @@
+---
+title: "Rackspace Final Report"
+author: "Charlie Wagner, Patrick Magnusson, Paulina Pastrana, Lyric Smith"
+date: "November 30, 2015"
+output: pdf_document
+---
+<br><br>
+
+###Understanding Rackspace Customers
+
+<p>
+In order for Rackspace to identify the proper growth strategies for its business, there has to be analytical constructs that recognize which variables are most important for continuing success as the #1 managed cloud company. Here, we shall use the data that Rackspace has provided to not only conclude what those variables are, but help Rackspace grasp a stronger understanding of their customers, and secure their competitive position as the premier company in web and cloud based services. It is important to note that although the data provided is dummy data for confidentiality purposes, the models created for this report can be applied for any dataset that has similar structure.</p>
+
+<br>
+
+###Constructing the Data
+<p>
+In order to provide Rackspace the necessary insight to make informed decisions for the future, the data that has been provided must first be reorganized and cleaned. First, all of the data from the various tables are matched to appropriate customer account numbers and joined into one table by customer account. This includes the revenue table that is left joined to the products table in order to organize all data into one concrete location.</p>
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+
+# load relevant libraries
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(reshape)
+library(stringr)
+library(moments)
+library(plotrix)
+library(randomForest)
+library(car)
+library(quantmod)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+library(GMD)
+
+setwd("C:/Users/Patrick Magnusson/Google Drive/Rackspace Project")
+# load data
+accounts = utils::read.csv(file="Trinity Accounts.csv")
+revenue = utils::read.csv("revenue.csv", stringsAsFactors = FALSE)
+revenue$Time.month.key = as.factor(revenue$Time.month.key)
+revenue$Cust_num = revenue$cust_num
+revenue = revenue[,-1]
+
+products = utils::read.csv(file="Products.csv")
+#join accounts and product tables to matched account numbers
+#further dummy data account numbers reserved in old variable
+products_edit = join(accounts, products, by="Cust_num", type="left", match="first")
+
+#combine all data into one table
+#multiple line items per account, one for each time.month.key
+dataset = join(products_edit, revenue, by="Cust_num", type="left", match="all")
+#remove "Customer name" which was an irrelevant variable, repititious of cust_num
+dataset = dataset[,-2]
+#turn time.month.key into just a month value, as year is always 2015
+dataset$month = str_sub(dataset$Time.month.key, -2)
+dataset = dataset[,-17]
+dataset = subset(dataset, select=c(Cust_num, month, 2:20))
+dataset = dataset[,1:20]
+
+
+
+
+```
+<br>
+
+####Descriptive Analysis
+
+<p>
+With the data combined, descriptive analysis of the various products can commence. Calculating the means of each binary variable for products shows that 62% of customers use Linux. This product far outweighs any others, with the next most popular product being Windows at approximately 17% of all customers. All other products, such as firewall, routers, and storage, are used by 3% or less of all customers. When analyzing server count, it was found that the majority of customers had zero servers based on the mean of the server count variable. This means that it is possible that these customers are turning to other types of Rackspace services, such as managed hosting of their own proprietary servers.
+</p>
+
+<p>
+Following products and server count, the next variables to be addressed are support volume and customer sentiment. For support volume, the range of values far exceed what is rationally expected, with the largest support volume customer reaching 15,441 service calls within a one-month period. No customer that demanded this kind of support would logically retain Rackspace services; thus, it can be assumed that these extreme cases are outliers, which will later be removed during quantitative analysis of support volume. The median support volume is 7 calls for a month, which is skewed to a mean of 11 calls by these rare, but very large values. This is also represented in the variable's skewness value of 96.33, skewed very much rightwards. Kurtosis is extremely high as well, at 
+9,429.595, showing that the data is clustered heavily around the mean.</p>
+
+<p>
+The median sentiment score is a 5 out of 10, skewed left to a mean of 4.68 out of 10. One can easily imagine that customers who must call in as frequently as the aforementioned outliers would have less positive sentiment than those who do not, and as such we foresee this discrepancy correcting itself with the removal of outliers. Skewness is small and negative as expected, and kurtosis for sentiment is far lower than support, at 1.77, showing a vastly more spread out dataset that is not clustered around the mean.</p>
+
+<p>
+In analyzing the variable that we are all here to discuss, revenue, there are three sets of descriptive statistics to look into: Cloud, Dedicated, and Total. Mean total monthly revenue is $182.43, skewed (31.48) right off the median amount of $16.67/month. Standard deviation is $1,341, showing that the outliers are enormously present here in revenue as well. When running a check on this, we do indeed see that the maximum monthly bill for a customer is $89,431, far above the center values. Cloud exhibits a slightly lower median revenue at $14.64, mean of $124.86, and standard deviation of $794.21, so we can see that the Cloud section is less expensive overall than Total, with less variance in that product subset. So, we would expect to see that the difference comes from Dedicated, and that this product line would be more expensive and varied. However, this is not the case from a simple mathematical standpoint. The vast majority of customers do not have Dedicated, on-metal servers, which is represented in the median value of $0, and because the mean comes out as $60.58, we see that the mean values do not reflect the actual higher typical prices.</p>
+<br>
+
+```{r, echo=FALSE, results='hide'}
+
+# means of binary variables, to determine percentage use
+
+mean(dataset$das)
+mean(dataset$dsan)
+mean(dataset$dnas)
+mean(dataset$san)
+mean(dataset$router)
+mean(dataset$firewall)
+mean(dataset$lb)
+mean(dataset$windows_flag)
+mean(dataset$linux_flag)
+
+mean(dataset$server_cnt)
+median(dataset$server_cnt)
+max(dataset$server_cnt)
+
+# descriptive statistics for support, sentiment
+
+min(dataset$support_volume)
+max(dataset$support_volume)
+median(dataset$support_volume)
+mean(dataset$support_volume)
+q1=as.numeric(quantile(dataset$support_volume)[2])
+q3=as.numeric(quantile(dataset$support_volume)[4])
+q3-q1
+sd(dataset$support_volume)
+std.error(dataset$support_volume)
+kurtosis(dataset$support_volume)
+skewness(dataset$support_volume)
+
+
+median(dataset$sentiment_score)
+mean(dataset$sentiment_score)
+q1.1=as.numeric(quantile(dataset$sentiment_score)[2])
+q3.1=as.numeric(quantile(dataset$sentiment_score)[4])
+q3.1-q1.1
+sd(dataset$sentiment_score)
+std.error(dataset$sentiment_score)
+kurtosis(dataset$sentiment_score)
+skewness(dataset$sentiment_score)
+
+
+# descriptive statistics for revenue variables
+
+median(dataset$Total_rev)
+mean(dataset$Total_rev)
+q1.2=as.numeric(quantile(dataset$Total_rev)[2])
+q3.2=as.numeric(quantile(dataset$Total_rev)[4])
+q3.2-q1.2
+sd(dataset$Total_rev)
+std.error(dataset$Total_rev)
+kurtosis(dataset$Total_rev)
+skewness(dataset$Total_rev)
+
+median(dataset$cloud_rev)
+mean(dataset$cloud_rev)
+q1.3=as.numeric(quantile(dataset$cloud_rev)[2])
+q3.3=as.numeric(quantile(dataset$cloud_rev)[4])
+q3.3-q1.3
+sd(dataset$cloud_rev)
+std.error(dataset$cloud_rev)
+kurtosis(dataset$cloud_rev)
+skewness(dataset$cloud_rev)
+
+median(dataset$dedicated_rev)
+mean(dataset$dedicated_rev)
+q1.4=as.numeric(quantile(dataset$dedicated_rev)[2])
+q3.4=as.numeric(quantile(dataset$dedicated_rev)[4])
+q3.4-q1.4
+sd(dataset$dedicated_rev)
+std.error(dataset$dedicated_rev)
+kurtosis(dataset$dedicated_rev)
+skewness(dataset$dedicated_rev)
+
+```
+
+#### Variable Correlation
+<p>
+To understand which variables are most highly correlated with growth, a correlation matrix is employed, due to its simplicity and completeness of picture. The variables "cloud_rev," "dedicated_rev," and "Total_rev" are correlated with all other variables in order to observe which variables are correlated with positive growth in revenue types.
+</p>
+
+<p>
+The five variables that correlate highest with Cloud revenue are "server_cnt," "windows_flag," "firewall," "lb," and "support_volume." Server count has the largest correlation with Cloud revenue at 12.4%. This indicates that the more servers customers use, the higher Cloud revenue increases. The only other product that has a correlation with Cloud revenue that is over 10% is Windows, meaning that customers with Windows drive Cloud revenue growth more than customers with other products. The trailing three products (firewall, load balancers, and support volume) all correlate with Cloud revenue between 6 and 10%. Two other products are correlated over 1% with Cloud revenue: Linux (4%) and virtualization (3%). The remaining products have insignificant coefficients versus Cloud revenue, all under a 1% correlation. </p>
+
+<p> The next revenue variable, Dedicated revenue, correlates strongest with load balancing with a 41.6% correlation. This could be because in Dedicated revenue, if a company is running a lot of its own servers in the dedicated environment, the need for load balancing might be more important. Virtualization, SAN, and firewalls all had between 30-40% correlation with Dedicated revenue, indicating that customers using these products also contribute significantly to Dedicated revenue. Lastly, DAS storage has the next highest correlation with Dedicated revenue at 16.5%, which still majorly influences Dedicated revenue. </p>
+
+<p> Lastly, total revenue is the combination of Dedicated and Cloud revenues. However, it's important to recall that over two-thirds of Rackspace's revenue is from Cloud-based services compared to dedicated services. Therefore, the variables that correlate strongest with Cloud revenue reappear as significant for total revenue. The product with the highest correlation with total revenue is load 
+balancers at 35.8%, while the service with the highest correlation is virtualization at 30.6%. Load balancers appeared slightly within Cloud revenue, while virtualization carried a significant correlation with both types of revenue. Firewalls and SAN storage had the next highest correlations with total revenue, at 29.4% and 24.2%. Firewalls had the second largest correlation for Cloud revenue and third largest correlation for Dedicated revenue, so the appearance of this product in total revenue is expected. SAN was largely significant for Dedicated revenue, and is proven significant for total revenue as well. DSAN and DNAS storage also have correlations with total revenue over 20%, indicating that storage services are a significant contribution to overall revenue. A variety of other variables carry correlations between 10-15%, including Windows, DAS, and server count. Only routers (which are only used by one customer) and sentiment score have low correlations with total revenue. However, it is important to note that customer sentiment 
+has a low correlation with total company revenue, Dedicated revenue, and Cloud revenue, indicating that<i> at face value </i>customer sentiment is largely unimportant to company profits. This is intriguing, because Rackspace is so dedicated to support. Sentiment will be analyzed in detail in later sections.
+</p>
+
+
+```{r, echo=FALSE, results='hide'}
+
+
+# correlation matrix
+
+cor(dataset[,5:20])
+
+
+
+
+```
+<br><br>
+
+#### Do customers using a particular product grow faster than other customers? 
+
+<p>For Rackspace US, Inc. the analysis of growth is very valuable as it helps to understand the customer base and segment them for optimal revenue to cost ratios. For this, we need to understand growth and the variables which lead to growth of certain customers.</p>
+
+<p>In this section we want to answer based on our data - Do customers using a particular product grow faster than other customers?</p>
+
+
+##### Outliers
+<p>When analyzing data, it is important to consider outliers as a result that they can lead to greater error rates or distortions in statistical patterns and conclusions derived from the dataset.</p>
+
+<p>In analyzing whether certain products contribute to growth in revenue, Cloud Revenue and Dedicated Revenue must be examined for outliers to accurately gauge revenue amounts that Rackspace has in regards to its usual operations.</p> 
+
+<p>Simply summarizing our initial data is always helpful to gain a bigger picture of a situation and aids in making proper subsequent decisions with the data.</p>
+
+###### Summary of the initial dataset for Cloud Revenue
+```{r, echo=FALSE}
+summary(dataset$cloud_rev)
+```
+
+<p>Based on the summary of Cloud Revenue, the median and mode for the original data set Cloud Revenue are 14.64, and 124.90 respectively. Our minimum value is -2398.00 and maximum value  is 46160.00. From these results it would be best to go ahead and remove outliers from our Cloud Revenue.</p> 
+###### Summary of the initial dataset for Dedicated Revenue 
+
+```{r, echo=FALSE}
+summary(dataset$dedicated_rev)
+```
+
+<p>Based on the summary of Dedicated Revenue, the median and mode for the original data set Dedicated Revenue are 0.00 and 60.58 respectively. Our minimum value is -367.70 and maximum value is 89430.00. From these results it would be best to go ahead and  remove outliers from our Cloud Revenue to avoid distortions in our analysis. </p>
+
+```{r, echo=FALSE}
+# Remove outliers (3 standard deviations from mean) from dataset into 'dataset_cleaned'
+
+dataset_cleaned = subset(dataset, (dataset$cloud_rev <= (mean(dataset$cloud_rev) + (sd(dataset$cloud_rev)*3))) & 
+                     (dataset$cloud_rev >= (mean(dataset$cloud_rev) - (sd(dataset$cloud_rev*3)))))
+
+dataset_cleaned = subset(dataset_cleaned, (dataset_cleaned$dedicated_rev <= (mean(dataset_cleaned$dedicated_rev) + (sd(dataset_cleaned$dedicated_rev)*3))) 
+                   & (dataset_cleaned$dedicated_rev >= (mean(dataset_cleaned$dedicated_rev) -   (sd(dataset_cleaned$dedicated_rev*3)))))
+
+
+
+```
+
+<p>When removing the outliers for our data set, it is important to consider removing them both from Cloud Revenue and Dedicated Revenue which will then give us our appropriate Total Revenue amounts. The removal of outliers was done by subsetting our dataset by calculating three standard deviations away from the respective mean both for Cloud Revenue and Dedicated Revenue. Values that resided outside those bounds were omitted thus creating a new data set found in *dataset_cleaned*.</p>
+
+
+##### A quick overview
+
+<p>It never hurts to view data in increasing granularity as a result that patterns seen early on, may or may not then be proven true. A quick look at the big picture allows just that. </p>
+
+<p>For the purpose of assessing whether certain products contribute to revenue growth, a dataset made specifically for this purpose is created as *Dataset_products_revenue* which includes all products and then Cloud Revenue, Dedicated Revenue, and Total Revenue.</p> 
+
+<p>From this dataset, all further analysis will be made in order not to accidentally modify the original *dataset_cleaned*. </p>
+```{r, echo=FALSE, results='hide'}
+
+Dataset_products_revenue = dataset_cleaned %>%
+  select(Cust_num,month, windows_flag, linux_flag, virt, das, dsan,
+    dnas, san, router, firewall, lb, server_cnt, cloud_rev, dedicated_rev, Total_rev)%>%
+    group_by(Cust_num)%>%
+    arrange(Cust_num, month)
+    
+
+
+```
+
+<p>In reference to increasing levels of granularity, having a summary of products and revenue by total is helpful in gauging which months for the current year were the highest in revenue. This summary of product totals and revenue totals can be found in the created table *Dataset_TotalsxMonth*. A quick glance at it may not initially help with being able to identify which products are the most contributing to revenue growth, but it does offer a look at the bigger picture. From referencing *Dataset_TotalsxMonth* the highest Total Revenue can be seen in January with the lowest in September, the highest Cloud Revenue total was in May with the lowest in September, and the highest Dedicated Revenue total seen in January with the lowest in August.</p> 
+
+```{r, echo=FALSE}
+
+#### begin counts of items into 'Dataset_TotalxMonth' ###
+
+Dataset_TotalsxMonth = Dataset_products_revenue %>% 
+  group_by(month) %>% 
+  summarise(
+    Cust_num = length(unique(Cust_num)),
+    windows_flag = sum(windows_flag),
+    linux_flag = sum(linux_flag),
+    virt = sum(virt),
+    das = sum(das),
+    dsan = sum(dsan),
+    dnas = sum(dnas),
+    san = sum(san),
+    router = sum (router),
+    firewall = sum(firewall),
+    lb = sum(lb),
+    server_cnt = sum(server_cnt), 
+    cloud_rev = sum(cloud_rev),
+    dedicated_rev = floor(sum(dedicated_rev)),
+    Total_rev = sum(Total_rev))
+
+
+```
+<br>
+
+##### Evaluating growth in revenue by product
+<p>To evaluate growth in Cloud, Dedicated, and Total Revenue, percent change in each was calculated by customer by month. This method was chosen in order to evaluate growth because information on how much revenue each individual product creates is not given by our data. Instead, calculating percent change in growth of revenue is more appropriate for the data. Totals of each product can be counted, and their relationship to percent change in growth of revenue can be made. By doing this, it is possible to analyze growth in Cloud, Dedicated, and Total Revenue by product. The percent change for each line of revenue is added then to our existing analysis dataset *Dataset_products_revenue*, and thus creating a new dataset we will work on from now on as *Dataset_GROWTH*.</p> 
+
+```{r, echo=FALSE, results='hide'}
+
+
+########### UPGRADE'Dataset_GROWTH' FROM 'Dataset_products_revenue' FOR PERCENTAGE CHANGE########
+
+Dataset_GROWTH = Dataset_products_revenue
+Dataset_GROWTH$PerChange_cloud_rev= round(with(Dataset_GROWTH, ave(cloud_rev,Cust_num, FUN = Delt)), digits = 4)*100
+Dataset_GROWTH$PerChange_dedicated_rev = round(with(Dataset_GROWTH, ave(dedicated_rev,Cust_num, FUN = Delt)), digits = 4)*100
+Dataset_GROWTH$PerChange_Total_rev = round(with(Dataset_GROWTH, ave(Total_rev,Cust_num, FUN = Delt)), digits = 4)*100
+
+for (i in 1:length(Dataset_GROWTH$PerChange_cloud_rev)) {
+  if (is.infinite(Dataset_GROWTH$PerChange_cloud_rev[i])==TRUE) {
+    Dataset_GROWTH$PerChange_cloud_rev[i] = 100.0
+  } else{}
+}
+
+for (i in 1:length(Dataset_GROWTH$PerChange_dedicated_rev)) {
+  if (is.infinite(Dataset_GROWTH$PerChange_dedicated_rev[i])==TRUE) {
+    Dataset_GROWTH$PerChange_dedicated_rev[i] = 100.0
+  } else{}
+}
+
+for (i in 1:length(Dataset_GROWTH$PerChange_Total_rev)) {
+  if (is.infinite(Dataset_GROWTH$PerChange_Total_rev[i])==TRUE) {
+    Dataset_GROWTH$PerChange_Total_rev[i] = 100.0
+  } else{}
+}
+
+```
+<br>
+
+<p>Increasing the level of granularity on the data, the relationship between each products' contribution to growth in each type of revenue can begin to be assessed visually by plotting. As a result, the following sections include plots for each revenues' percent growth change by product found in our *Dataset_GROWTH* table.</p>
+<br>
+
+###### Plot analysis between total Dedicated Revenue growth and products
+<p>The following are plots detailing the relationship between Dedicated Revenue Growth and each product offered by Rackspace.</p>
+
+```{r, echo=FALSE}
+
+######### PLOT ANALYSIS BETWEEN TOTAL DEDICATED REVENUE AND DEVICES ##########
+
+layout(matrix(1:4, nrow = 2))
+plot(PerChange_dedicated_rev ~ windows_flag, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ linux_flag, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ virt, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ das, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ dsan, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ dnas, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ san, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ router, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ firewall, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ lb, data = Dataset_GROWTH)
+plot(PerChange_dedicated_rev ~ server_cnt, data = Dataset_GROWTH)
+
+```
+
+<p>From the plots what is initially observed is the fact that despite a customer having a specific product or not, most points if not all cluster at 0 or very close to 0 on the y - axis which is where Percent Change in Dedicated Revenue is found. What this may soon point to is that Dedicated Revenue change, based on the data provided may not be driven by a specific product. A second observation in all of the plots is the existence of a single point of which Percent Change in Dedicated Revenue is less than -3000. Upon further investigation, this value is mathematically correct because of a significant increase from a negative revenue amount to a positive amount in the month of March for Customer #323. </p>
+<br>
+
+###### Plot analysis between total Cloud Revenue growth and products
+<p>The following are plots detailing the relationship between Cloud Revenue Growth and each product offered by Rackspace.</p>
+```{r, echo=FALSE}
+
+######### PLOT ANALYSIS BETWEEN TOTAL CLOUD REVENUE AND DEVICES ###########
+layout(matrix(1:4, nrow = 2))
+plot(PerChange_cloud_rev ~ windows_flag, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ linux_flag, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ virt, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ das, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ dsan, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ dnas, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ san, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ router, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ firewall, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ lb, data = Dataset_GROWTH)
+plot(PerChange_cloud_rev ~ server_cnt, data = Dataset_GROWTH)
+
+```
+
+<p>From the plots what is discovered is that despite a customer having a specific product or not, most points if not all cluster at 0 or very close to 0 on the y - axis which is where Percent Change in Cloud Revenue is found. What this may soon point to is that Cloud Revenue change, based on the data provided may not be driven by a specific product. One instance that drew some attention was the data point for Percent Change in Cloud Revenue greater than 5,000,000 which is explained for Customer #4953 from January Cloud Revenue of (0.01) to February Cloud Revenue (513.34).</p>
+
+###### Plot analysis between Total Revenue and products
+<p>The following are plots detailing the relationship between Total Revenue Growth and each product offered by Rackspace.</p>
+```{r,echo=FALSE}
+
+########### PLOT ANALYSIS BETWEEN TOTAL REVENUE AND DEVICES ########
+layout(matrix(1:4, nrow = 2))
+plot(PerChange_Total_rev ~ windows_flag, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ linux_flag, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ virt, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ das, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ dsan, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ dnas, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ san, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ router, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ firewall, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ lb, data = Dataset_GROWTH)
+plot(PerChange_Total_rev ~ server_cnt, data = Dataset_GROWTH)
+
+```
+
+<p>From the plots what is discovered is that despite a customer having a specific product or not, most points if not all cluster at 0 or very close to 0 on the y - axis which is where Percent Change in Total Revenue is found. What this may soon point to is that Total Revenue change, based on the data provided may not be driven by a specific product.One instance that drew some attention was the data point for Percent Change in Cloud Revenue greater than 5,000,000 which is explained for Customer #4953 from January Cloud Revenue of (0.01) to February Cloud Revenue (513.34).</p>
+<br><br>
+
+
+##### Multiple Linear Regression Models
+
+<p>To fully examine if a relationship is present between Percent Change in each of the revenues to the different products offered by Rackspace a multiple linear regression model for each revenue was created seen below. Multiple linear regressions aid in illustrating a relationship between two or more variables - in this case Rackspace products, to a response variable - Percent Change in Revenue (growth) by fitting a linear equation to the dataset. This is specifically important in our situation, to make sure the visual representation of the plots can either be confirmed or proven wrong by the values from the multiple linear regression.</p> <br>
+
+###### Cloud Revenue growth multiple linear regression model 
+```{r, echo=FALSE}
+
+# Cloud Revenue Linear Regression
+GrowthFitCloud <- lm (Dataset_GROWTH$PerChange_cloud_rev 
+                      ~ Dataset_GROWTH$windows_flag +
+                        Dataset_GROWTH$linux_flag+
+                        Dataset_GROWTH$virt+
+                        Dataset_GROWTH$das+
+                        Dataset_GROWTH$dsan+
+                        Dataset_GROWTH$dnas+
+                        Dataset_GROWTH$san+
+                        Dataset_GROWTH$router+
+                        Dataset_GROWTH$firewall+
+                        Dataset_GROWTH$lb+
+                        Dataset_GROWTH$server_cnt,
+                      data = Dataset_GROWTH)
+
+
+summary (GrowthFitCloud)
+
+```
+
+<p>Based on the summary of the Cloud Revenue Growth multiple linear regression model, it appears that no product is statistically significant when it comes to assessing Percent Change in Cloud Revenue. With a p-value of 0.8545, the null hypothesis of the products having an effect on Percent Change in Cloud Revenue can not be rejected.</p> <br>
+
+###### Dedicated Revenue growth multiple linear regression model 
+```{r, echo=FALSE}
+
+#Dedicated Revenue Linear Regression 
+GrowthFitDedicated <- lm(Dataset_GROWTH$PerChange_dedicated_rev 
+                         ~ Dataset_GROWTH$windows_flag +
+                           Dataset_GROWTH$linux_flag+
+                           Dataset_GROWTH$virt+
+                           Dataset_GROWTH$das+
+                           Dataset_GROWTH$dsan+
+                           Dataset_GROWTH$dnas+
+                           Dataset_GROWTH$san+
+                           Dataset_GROWTH$router+
+                           Dataset_GROWTH$firewall+
+                           Dataset_GROWTH$lb+
+                           Dataset_GROWTH$server_cnt,
+                         data = Dataset_GROWTH)
+
+summary(GrowthFitDedicated)
+```
+<p>Based on the summary of the Dedicated Revenue Growth multiple linear regression model, it appears that no product is statistically significant when it comes to assessing Percent Change in Dedicated Revenue. With a p-value of 0.9167, the null hypothesis of the products having an effect on Percent Change in Dedicated Revenue can not be rejected.</p> <br><br>
+
+###### Total Revenue growth multiple linear regression model 
+```{r, echo=FALSE}
+
+#Total Revenue Linear Regression
+GrowthFitTotal <- lm(Dataset_GROWTH$PerChange_Total_rev 
+                     ~ Dataset_GROWTH$windows_flag +
+                       Dataset_GROWTH$linux_flag+
+                       Dataset_GROWTH$virt+
+                       Dataset_GROWTH$das+
+                       Dataset_GROWTH$dsan+
+                       Dataset_GROWTH$dnas+
+                       Dataset_GROWTH$san+
+                       Dataset_GROWTH$router+
+                       Dataset_GROWTH$firewall+
+                       Dataset_GROWTH$lb+
+                       Dataset_GROWTH$server_cnt,
+                     data = Dataset_GROWTH)
+
+summary(GrowthFitTotal)
+
+```
+<p>Based on the summary of the Total Revenue Growth multiple linear regression model, it appears that no product is statistically significant when it comes to assessing Percent Change in Total Revenue. With a p-value of 0.8641, the null hypothesis of the products having an effect on Percent Change in Total Revenue can not be rejected.</p> <br>
+
+##### Testing assumptions for multiple linear regression models
+<p>Although the multiple linear regression models resulted in the lack of significance of products offered by Rackspace on overall revenue growth, it is important to make sure that the models are valid for prediction and inference. This can be assessed visually through plots of our multiple linear regression models and the Durbin Watson Test with a score of 2 indicating no autocorrelation between independent variables. </p>
+
+
+<p>There are four assumptions which must be tested:<br>
+1. Linearity between dependent and independent variables<br>
+2. Statistical independence of the errors - collinearity between independent variables<br>
+3. Homoscedasticity - constant variance of the errors<br>
+4. Normality of the error distribution</p>
+
+###### Cloud Revenue growth test for multiple linear regression model  
+```{r, echo=FALSE}
+###Cloud Revenue Test
+plot(GrowthFitCloud)
+
+# linearity - checks out Residuals vs Fitted
+# homoscedasticity - checks out Residuals vs Fitted
+# normality - checks out Q-Q Test
+
+## Durbin Watson Test
+durbinWatsonTest(GrowthFitCloud)
+
+# collinearity - DW statistic of 2.000269 - no autocorrelation
+
+```
+
+<p>When testing the four assumptions for our Cloud Revenue Growth Model<br>
+1. Linearity is appropriately linear when consulting the Residuals vs. Fitted plot<br>
+2. There is no autocorrelation between independent variables based on the Durbin Watson Test value of 2.000269<br>
+3. Homoscedasticity - there are no violations when consulting the Residuals vs. Fitted plot<br>
+4. Normality - there are no violations when consulting the Q - Q Plot</p><br><br><br>
+
+
+###### Dedicated Revenue growth test for multiple linear regression model 
+```{r, echo=FALSE}
+
+### Dedicated Revenue Test
+
+plot(GrowthFitDedicated)
+
+#linearity - does not check out on Residuals vs Fitted 
+#homoscedasticity - checks out on Residuals vs Fitted 
+#normality - checks out on Q - Q Test
+
+##Durbin Watson Test
+
+durbinWatsonTest(GrowthFitDedicated)
+
+#collinearity - DW statistic of 1.934885 - no autocorrelation
+
+
+```
+<p>When testing the four assumptions for our Dedicated Revenue Growth Model<br>
+1. Linearity is not appropriately linear when consulting the Residuals vs. Fitted plot<br>
+2. There is no autocorrelation between independent variables based on the Durbin Watson Test value of 1.934885<br>
+3. Homoscedasticity - there are no violations when consulting the Residuals vs. Fitted plot<br>
+4. Normality - there are no violations when consulting the Q - Q Plot</p><br><br><br>
+
+
+###### Total Revenue growth test for multiple linear regression model 
+```{r, echo=FALSE}
+
+##Total Revenue Test 
+plot(GrowthFitTotal)
+
+
+#linearity - checks out on Residual vs Fitted
+#homoscedasticity - checks out on Residuals vs Fitted
+#normality - checks out on Q-Q Test
+
+
+durbinWatsonTest(GrowthFitTotal)
+#collinearity - no autocorrelation DW test statistic = 2.000264
+
+
+```
+<p>When testing the four assumptions for our Total Revenue Growth Model<br>
+1. Linearity is appropriately linear when consulting the Residuals vs. Fitted plot<br>
+2. There is no autocorrelation between independent variables based on the Durbin Watson Test value of 2.000264<br>
+3. Homoscedasticity - there are no violations when consulting the Residuals vs. Fitted plot<br>
+4. Normality - there are no violations when consulting the Q - Q Plot</p><br><br><br>
+
+
+#### Do customers using a particular product have better sentiment? 
+##### Subsets of data based on product
+<p>
+After viewing the entire products table in relation to the sentiment for each product it was determined that many customers use multiple products at a time. This realization prompted the need to only take into account the customers who solely use a particular product. We can ensure that their sentiment is directly related to a given product and not skewed upwards or downwards by the excellent or sub-par performance of a particular product. </p>
+
+```{r, echo=FALSE}
+ #subset by specific dataset
+ pwindows_flag <- subset(dataset,windows_flag== 1 & linux_flag == 0 & virt == 0 & das == 0 &
+                           dsan == 0 & san == 0 & router == 0 & lb == 0 & firewall == 0)
+ plinux_flag <- subset(dataset,linux_flag== 1 & windows_flag == 0 & virt == 0 & das == 0 &
+                         dsan == 0 & san == 0 & router == 0 & lb == 0 & firewall == 0)
+ pvirt<- subset(dataset,virt == 1 & windows_flag == 0 & linux_flag == 0 & das == 0 &
+                  dsan == 0 & san == 0 & router == 0 & lb == 0 & firewall == 0)
+ pfirewall <- subset(dataset,firewall == 1 & windows_flag == 0 & linux_flag == 0 & das == 0 &
+                       dsan == 0 & san == 0 & router == 0 & lb == 0 & virt== 0)
+```
+<br>
+
+###### Average of each product's sentiment
+<p>
+As expected, some products were omitted from the evaluation process due to the fact that they are only used in conjunction with other products. Therefore the remaining products to be evaluated are Windows and Linux, use of Virtualizations, and Firewall Protection. The mean of each customers sentiment score is taken so that per product it can be determined which product has a higher sentiment.</p>
+```{r, echo=FALSE}
+#sentiment scores/product 
+mw <- mean(pwindows_flag[["sentiment_score"]])
+ml <- mean(plinux_flag[["sentiment_score"]])
+mv <- mean(pvirt[["sentiment_score"]])
+mf <- mean(pfirewall[["sentiment_score"]])
+```
+
+
+```{r, echo=FALSE}
+ #create dataframe
+ productsv.sentiment <- data.frame (
+  product= 
+    c("windows_flag", "linux_flag", "virt", "firewall") ,
+ sentiment_scores= 
+   c(mw,ml,mv,mf)
+  )
+```
+
+<p> Creation of a data frame with the mean sentiment scores for each product is made, so that a scatterplot can be created to visually prove the higher sentiment of a particular product.</p>
+
+#####Plot of the each product's sentiment according to customers
+```{r, echo = FALSE}
+ #plot products v. sentiment
+plot(productsv.sentiment, main="Product & Sentiment", 
+    xlab="Product ", ylab="Sentiment_Score ")
+   
+#Range of dataframe
+mf - ml
+```
+
+<p>
+From the above scatterplot it is proven that customers who are solely using the Firewall have a much higher sentiment (on average the sentiment is 2.712122 points higher) than those that do not use the firewall exclusively. Therefore, we have proven that certain products (Firewall Protection) do in fact have much better sentiment according to customers than that of other products. I would be most useful if all of the products could be used in this analysis, because of the fact that 5 products were taken out of our sample due to the fact that they are used in conjunction with other products. More pointed questions need to be asked to the customers regarding each individual products sentiment so that better reporting on sentiment for each product in particular can be procured.</p><br><br>
+
+
+#### What combination of products drive growth?
+
+
+##### An overview 
+<p>
+In asking this question, we seek a better understanding of the groups of Rackspace's products that are responsible for driving the company's revenue most powerfully. 
+This is one of the prime objectives of this project: to determine where the company's efforts are best served with its product offerings, from a strict revenue standpoint. A less lucrative product is one that perhaps deserves less work done for it overall, and costs can be cut or downsized, and put into those more important to the financial health and future of the firm.</p>
+
+<p>
+The products being considered are as follows: the Windows and Linux Operating Systems, Virtualization vs. not, DAS, DSAN, DNAS, and SAN hard drive technologies, the presence of a network Router, the presence of a Firewall for security, and the presence of a Load Balancer on the server(s). Let us examine the distribution for both the Cloud and Dedicated segments: </p>
+
+```{r, echo=FALSE}
+
+####### QUESTION 5: "What combination of products drives [revenue] growth?" #########
+
+
+boxplot(dataset$cloud_rev, main="Cloud Revenue")
+boxplot(dataset$dedicated_rev, main="Dedicated Revenue")
+
+
+```
+<p> We see that in both of the main product segments there are enormous outliers for accounts and charges. The mean of Cloud revenue is $124.86, while its median is $14.64. We can observe from this that the mean is very skewed by the extraneous large values, especially in consideration of the fact that there <i> are, in fact </i> negative values in the revenue figures, representing cases where credits to an account in a given month are larger than the charges. Dedicated revenue has a mean of $60.58, and a median of $0, which upon closer inspection makes sense, given that the most vastly prevalent value is 0; Dedicated is used significantly less by customers than Cloud. But this, Rackspace already knows. The first step is to remove outliers from the dataset, in terms of revenue.The standard deviation for the Cloud and Dedicated segments is 794.21 and 1027.989, respectively. All values beyond 3 standard deviations from their respective means have been culled from this analysis, to more accurately portray normal scenarios, without these exceptionally large (and rare) values and events. Total Revenue is simply recalculated as the sum of the Cloud and Dedicated revenues for a given Account and Month. </p>
+
+
+```{r, echo=FALSE}
+
+
+# remove outliers in revenue, recalculate total revenue
+# note to self: attach(), detach()
+
+dataset5 = subset(dataset, (dataset$cloud_rev <= (mean(dataset$cloud_rev) + (sd(dataset$cloud_rev)*3))) & (dataset$cloud_rev >= (mean(dataset$cloud_rev) - (sd(dataset$cloud_rev*3)))))
+#boxplot(dataset5$cloud_rev, main="Cloud Revenue")
+#negative values present in cloud, possibility of credits overruling revenues???
+#mean(dataset5$cloud_rev)
+#median(dataset5$cloud_rev)
+
+dataset5 = subset(dataset5, (dataset5$dedicated_rev <= (mean(dataset5$dedicated_rev) + (sd(dataset5$dedicated_rev)*3))) & (dataset5$dedicated_rev >= (mean(dataset5$dedicated_rev) -   (sd(dataset5$dedicated_rev*3)))))
+#boxplot(dataset5$dedicated_rev, main="Dedicated Revenue")
+#mean(dataset5$dedicated_rev)
+#median(dataset5$dedicated_rev)
+
+
+dataset5$Total_rev = dataset5$cloud_rev+dataset5$dedicated_rev
+
+dataset5 = dataset5[order(dataset5$Cust_num, dataset5$month),]
+
+# calculate, clean growth amounts, sum totals
+
+dataset5$cloud_growth = round(with(dataset5, ave(cloud_rev, Cust_num, FUN=Delt)), digits=4)*100
+dataset5$dedicated_growth = round(with(dataset5, ave(dedicated_rev, Cust_num, FUN=Delt)), digits=4)*100
+#source: StackOverflow to calc % change
+
+for (i in 1:length(dataset5$cloud_growth)) {
+  if (is.infinite(dataset5$cloud_growth[i])==TRUE) {
+      dataset5$cloud_growth[i] = 100.0
+  } else{}
+}
+
+for (i in 1:length(dataset5$dedicated_growth)) {
+  if (is.infinite(dataset5$dedicated_growth[i])==TRUE) {
+      dataset5$dedicated_growth[i] = 100.0
+  } else{}
+}
+
+dataset5$total_growth = rowSums(cbind(dataset5$cloud_growth, dataset5$dedicated_growth), na.rm=TRUE)
+#source: StackOverflow: to ignore NAs in column summation
+
+dataset5$cloud_growth[is.na(dataset5$cloud_growth)] = 0
+dataset5$dedicated_growth[is.na(dataset5$dedicated_growth)] = 0
+
+
+
+
+```
+<br>
+
+##### Analysis 
+<p>
+With this out of the way, the actual analysis may begin. What we want to know is what are the groups, the classes, the combinations of products on offer that drive high revenue amounts. To reach this goal, three classification methods are used to make sense of the data, before going into a regression analysis. The first is k-means clustering, to get a sense of how many clusters are appropriate for this dataset. Because the products are given in the dataset as 'flags,' i.e. binary values with 1 representing the presence of the product, and 0 representing its absence, the calculation of distance between clusters cannot be Euclidean in nature. As such, the distance calculation is performed using the binary method. After transposing the data, k-means clusters are performed and checked as seen below. for 3,4,5, and 6 clusters specified up front. </p>
+
+###### K-means clustering for products
+```{r, echo=FALSE}
+
+
+# K-means clustering for products
+mat = matrix(nrow = 23, ncol = 86954)
+mat = t(dataset5)
+mat.use = mat[7:16,]
+mat.dist = dist(mat[7:16,], method="binary")
+
+set.seed(123456)
+mat.k3 = kmeans(mat.use, 3, nstart=1)
+sort(mat.k3$cluster)
+mat.k4 = kmeans(mat.use, 4, nstart=1)
+sort(mat.k4$cluster)
+mat.k5 = kmeans(mat.use, 5, nstart=1)
+sort(mat.k5$cluster)
+mat.k6 = kmeans(mat.use, 6, nstart=1)
+sort(mat.k6$cluster)
+
+k.vector = c(sum(mat.k3$withinss), sum(mat.k4$withinss), sum(mat.k5$withinss), sum(mat.k6$withinss))
+names(k.vector) = 3:6
+plot(k.vector, main="K-means cluster effectiveness - products")
+lines(k.vector)
+text(k.vector, c("3","4","5","6"), pos=4, col="black")
+#we see that 5 clusters is the best amount to use, based on diminishing returns
+
+```
+
+<p>
+For each additional cluster, more detail is added to the model: as we can see, the 3-cluster set is almost all in cluster 1, with only Windows and Linux OS's being given their own cluster. When 4 clusters are employed, Virtualization and Firewall fall into a cluster together, with the OS's still receiving their own. With 5 clusters, OS's, Virtualization, and Firewall are by themselves, with all else in a cluster together. Finally, 6 clusters places OS's, Firewall, and Virtualization in their own, with SAN and Load Balancer together, and all else together. When plotting the relative effectiveness of adding a cluster, we can see that when moving from 3 to 4, a great deal of differentiation is given, and to a certain extent the same idea for the move from 4 to 5, by the time one is reaching 6 clusters on this data, diminishing returns take hold and it becomes no longer necessary to draw any further distinctions. Thus, it is extrapolated from the k-means analysis that there are to be 5 distinct clusters in the product data. </p><br><br>
+
+###### Heirarchial clustering for products
+<p>
+Keeping this in mind, the next method used is a hierarchical clustering, using the transposed matrix: </p>
+
+```{r, echo=FALSE}
+
+
+
+#Heirarchical clustering for products
+
+
+mat.cluster = hclust(mat.dist, method="average")
+mat.clusterDD = as.dendrogram(mat.cluster)
+plot(mat.clusterDD, main="Heirarchical clusters - Products")
+plot(mat.clusterDD, main="Heirarchical clusters - Products")
+# determined optimum number of clusters with k-means
+rect.hclust(mat.cluster, 5, border=c(1,2,3,4,6))
+
+
+
+
+
+```
+
+<p>The initial hierarchical clustering can be seen in the first plot above. Knowing that vertical distance upon a line is what distinguishes an item as different from another, it is immediately clear that most of these products are very independent. This can be in part attributed to the binary nature of the data. Using the knowledge from the k-means analysis that there should conceivably be 5 distinct clusters in play in this data, the second plot is created, with boxes to distinguish them. We glean from this the following: <br>
+Cluster 1: Router<br>
+Cluster 2: DNAS<br>
+Cluster 3: DSAN<br>
+Cluster 4: Windows and Linux <br>
+Cluster 5: DAS, Virtualization, Firewall, SAN, and Load Balancers </p><br><br>
+
+
+###### Decision Trees Analysis
+<p>
+These clusters, however, do not mean much by themselves, and so in attempt to gauge in a more quantitative way the reason for a clustering split, the Decision Tree method will be used as the final technique. Here, we examine Cloud, Dedicated, and Total Revenue versus the products in order to see for which and at what levels there are splits in the dataset based on product:</p>
+
+
+```{r, echo=FALSE}
+
+
+# Decision tree for products - cloud, dedicated and total revenue as Y variable
+
+set.seed(123456)
+cloud.tree = rpart(cloud_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=dataset5, control=rpart.control(minsplit=100))
+fancyRpartPlot(cloud.tree, main="Cloud Revenue", sub="")
+
+
+
+```
+<p> For cloud, the splits are rather simple. Given that this is binary data, the rpart tree denotes 0's as being less than 0.5, the mean of 0 and 1, and 1's as being greater than 0.5. Thus, when reading this, we see that the top 16% of Cloud revenue, of at least $183, comes from when Windows is not less than 0.5, thus it is installed, denoted by a 1. When this is not the case, the lower 84% is divided based upon whether Linux is installed. When Linux is present, revenue is at least $88, and 57% of the Cloud data falls into this category. The lowest 27% comes when neither OS is installed on the server. Thus, for Cloud, we can see that high revenue is dependent mainly on the presence of an Operating System, and the product combination other than that is not necessarily relevant. In analyzing the summary for this decision tree, Windows carries a weight in splitting of 65, Linux of 27, and Firewall, Virt. and DAS, have 4,3,and 1, respectively, with all else having no weight. This backs up the previous assessment.</p>
+
+```{r, echo=FALSE}
+
+set.seed(123456)
+ded.tree = rpart(dedicated_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=dataset5, control=rpart.control(minsplit=100))
+fancyRpartPlot(ded.tree, main="Dedicated Revenue", sub="", cex=0.9)
+
+```
+
+<p>
+For Dedicated, the picture is a bit more complicated, and is better at showing us a combination of products that leads to superior revenue. When the Dedicated server is Virtualized, <i> and</i> has a Load Balancer, the top sub-1% of revenue is reached, at at least $1,427. When the server is Virtualized, but does vs. does not have Windows, we get the next two tiers, 1% at at least $986, and less than 1% at at least $522.<br>
+On the other side of the first split, when the server is not Virtualized, the dependency is on the Firewall. When there is a Firewall, revenue is classed at at least $254, yet another 1% tier of the data. What's so fascinating about Dedicated is that 97% of the data for it falls into the lowest tier, of at least $1.40, when the server is neither virtualized, or has a firewall. </p>
+
+
+```{r, echo=FALSE}
+
+set.seed(123456)
+total.tree = rpart(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=dataset5, control=rpart.control(minsplit=100))
+fancyRpartPlot(total.tree, main="Total Revenue", sub="")
+
+
+```
+<p>
+The final tree, for Total Revenue, to get a big picture approach, shows that the top 1% tier of at least $1,074 emerges from the presence of a Firewall, and Virtualization, with a secondary 1% tier of at least $525 emerging from the presence of the former, but not the latter. Without a Firewall, it is Windows that drives revenue, 14% at at least $188 when Windows is present, with the bottom 83% at at least $67, with neither Firewall or Windows. </p><br><br>
+
+###### Regression Analysis
+
+<p>
+These four groups will be the basis for the regression analysis (below), the summary printouts in the following order: the 83% (Group 1), the 14% (Group 2), the lower 1% (Group 3), and the highest 1% (Group 4): </p>
+
+```{r, echo=FALSE}
+
+
+
+
+# Regression on Total Revenue groups and full set based on Tree
+
+attach(dataset5)
+
+
+#full set
+lm.all = lm(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=dataset5)
+#summary(lm.all)
+
+#firewall is 0, windows is 0, 83% G1
+rev.sub1 = subset(dataset5, (firewall==0 & windows_flag==0))
+lm.sub1 = lm(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=rev.sub1)
+summary(lm.sub1)
+
+#firewall is 0, windows is 1, 14% G2
+rev.sub2 = subset(dataset5, (firewall==0 & windows_flag==1))
+lm.sub2 = lm(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=rev.sub2)
+summary(lm.sub2)
+
+#firewall is 1, virt is 0, 1% G3
+rev.sub3 = subset(dataset5, (firewall==1 & virt==0))
+lm.sub3 = lm(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=rev.sub3)
+summary(lm.sub3)
+
+#firewall is 1, virt is 1, 1% G4
+rev.sub4 = subset(dataset5, (firewall== 1 & virt==1))
+lm.sub4 = lm(Total_rev ~ windows_flag+linux_flag+virt+das+dsan+dnas+san+router+firewall+lb, data=rev.sub4)
+summary(lm.sub4)
+
+detach(dataset5)
+
+
+#end Question 5 code
+
+
+```
+
+<p>
+Based on the group for which the regression is run, the results as to the significant variables affecting revenue differ.<br>
+For Group 1, with neither Firewall or Windows, it is only Linux that is seen as significant ($63.49+). Group 2, with no Firewall but with Windows, Linux as a second OS is the single significant variable, with positive effect of $93.62.<br>
+Group 3, non-virtualized with Firewall, gains greatly in revenue from Windows and Linux, ~$400 for each, and also for SAN ($961.30+0) and Load Balancers ($636.28+).<br>
+Group 4, virtualized with Firewall, shows lower but yet positive effects for Windows and Linux ($283,$186), a boost from DAS ($247.15), a possibly less significant revenue loss on DNAS, and gains from SAN and Load Balancers as well. </p>
+
+<p>
+An issue is clear with all of the above regression models: many of the variables for each is listed as NA in the summaries. This is due to singularities in the binary data, the Groups the tree advised lead to binaries where only 0s or 1s are present. This means regression cannot analyze the change, when the variable seen is a constant, and the variable is thus ignored. Also apparent is the very low R-squared values provided by these models. While the p-value is definitely within any conceivable confidence interval for all 4 groups, R-square, the measure of revenue variance explained, is at most 15.42% and at lowest, 1.64%. This implies that there are many variables not considered in this analysis that play key roles in explaining changes in revenue, other than combination of products.</p><br><br>
+
+
+
+
+
+#### What products drive more support? 
+
+##### Outliers
+
+<p>In order to determine which products drive more support, it's first important to identify if there are any outliers in the "support volume" column. If there are customers that require an usual amount of support, then they should be removed so that the data for "support volume" most accurately represents the kind of support that Rackspace will need to provide for its different products.</p>
+
+
+```{r, echo=FALSE}
+
+#To check for outliers in support_volume
+foo=boxplot(dataset$support_volume, main="Identification of outliers")
+max(dataset$support_volume)
+summary(dataset$support_volume)
+```
+
+<p>The boxplot shows that there are indeed several outliers for the variable "support volume." One, in particular, is extremely beyond the typical amount of support for a customer. The maximum and summary of the "support volume" column shows that the median and mean are 7 and 11.15 respectively, while the maximum value is over 15,000 (though this is not the only outlier).</p>
+
+<p>Now that outliers have been found, they must be removed. This can be achieved by multiplying the standard deviation of "support volume" by 3 (in order to accommodate 99.7% of all values) and removing any values above that benchmark.</p>
+
+```{r, echo=FALSE}
+#create the benchmark for outliers (more than 3 standard deviations)
+sd(dataset$support_volume)
+mark = sd(dataset$support_volume)*3
+mark
+```
+
+<p>The standard deviation for support volume is clearly 157.58. When multiplied by 3, it equals 472.74. Any customers that demand support more than 472 times are therefore outliers for this variable. By subsetting the data into two groups separated by the number 472.74, it is possible to determine exactly how many outliers there are.</p>
+
+```{r, echo=FALSE}
+#subset the data to determine how many outliers there are based on the benchmark
+support.outside = subset(dataset$support_volume, dataset$support_volume >= (472.74+11.15))
+str(support.outside)
+summary(support.outside)
+```
+<br>
+
+###### Removal of outliers
+<p>The subsets show that there are exactly 44 outliers that need to removed from the total number of values in the "support volume" variable. The next step is to remove them and to observe a summary of the new variable "support volume" without these outliers included.</p>
+
+```{r, echo=FALSE}
+#Remove outliers from the data
+dataset1 = dataset[(dataset$support_volume<(472.74+11.15)),]
+summary(dataset1$support_volume)
+str(dataset1$support_volume)
+mean(dataset1$support_volume)
+median(dataset1$support_volume)
+```
+
+<p>There are now 87,700 values in support volume that range from 0 to 385. The variable has a mean of 9.3 and a median of 7, indicating that there is still some skewness to the right because of customers with a large number of support requests.</p><br><br>
+
+
+##### Support Analysis 
+<p>With the variable "support volume" officially cleaned and ready for analysis, the next step is to subset the data so that only customers with 1 server can be compared to customers with more than 1 server. That way, it's possible to determine whether support for products changes between customers with only one server and customers with multiple servers.</p>
+
+
+```{r, echo=FALSE}
+#Unsuccessfully trying to melt the products columns to identify how many products each customer uses
+#dataset4 = dataset1[,5:17]
+#dataset4$lb = as.numeric(dataset4$lb)
+#dataset4.1 = melt(dataset3, id.vars = "support_volume", measure.vars = c("windows_flag", "linux_flag", "virt", "das", "dsan", "dnas", "san", "router", "firewall", "lb"), value.name = "Platforms")
+
+#Subset data so only customers with one server are included
+dataset2 = subset(dataset1, dataset1$server_cnt == (1))
+mean(dataset2$support_volume)
+str(dataset2$support_volume)
+
+dataset3 = subset(dataset1, dataset1$server_cnt > 1)
+mean(dataset3$support_volume)
+str(dataset3$support_volume)
+```
+
+<p>With the new subsets created, products can be compared individually between customers with more than 1 server and customers with only one server. The first products to be analyzed will be Windows and Linux.</p><br><br>
+
+###### Analysis of Windows and Linux
+
+```{r, echo=FALSE}
+#Customers with windows and only 1 server vs. customers with windows and multiple servers
+windows2 = subset(dataset2, dataset2$windows_flag == 1)
+str(windows2$windows_flag)
+mean(windows2$support_volume)
+median(windows2$support_volume)
+
+windows3 = subset(dataset3, dataset3$windows_flag == 1)
+str(windows3$windows_flag)
+mean(windows3$support_volume)
+median(windows3$support_volume)
+
+#------------------------------------------------------
+
+#Customers with linux and only 1 server vs. customers with linux and multiple servers
+linux2 = subset(dataset2, dataset2$linux_flag == 1)
+str(linux2$linux_flag)
+mean(linux2$support_volume)
+
+linux3 = subset(dataset3, dataset3$linux_flag == 1)
+str(linux3$linux_flag)
+mean(linux3$support_volume)
+```
+
+<p>Both Windows and Linux customers tend to have only server. However, many more customers that use Linux only have one server compared to the customers that use Window. The mean support volume for Windows customers nearly doubles when more than 1 server is used: from 13 to 24. However, Linux customers with multiple servers have almost 4 times as much support volume on average than those with one server: from 8.8 to 23.2! Next are the virtualization and DAS product users.</p><br><br>
+
+
+###### Analysis of Virtualization and DAS 
+```{r, echo=FALSE}
+#Customers with virt and only 1 server vs. customers with virt and multiple servers
+virt2 = subset(dataset2, dataset2$virt == 1)
+str(virt2$virt)
+mean(virt2$support_volume)
+
+virt3 = subset(dataset3, dataset3$virt == 1)
+str(virt3$virt)
+mean(virt3$support_volume)
+
+#------------------------------------------------------
+
+#Customers with DAS and only 1 server vs. customers with DAS and multiple servers
+das2 = subset(dataset2, dataset2$das == 1)
+str(das2$das)
+mean(das2$support_volume)
+
+das3 = subset(dataset3, dataset3$das == 1)
+str(das3$das)
+mean(das3$support_volume)
+```
+
+<p>Of the 1541 customers that use virtualization from Rackspace, roughly 60% of them use one server. For those customers, mean support volume is roughly half of those with multiple servers: from 46.8 to 95.5!</p>
+
+<p>For DAS customers, the majority (55%) have more than one server. But for those with multiple servers, the mean support volume is 119.2, compared to only 74.4 for customers with DAS and only one server.</p><br><br>
+
+
+###### Analysis of DSAN and DNAS.
+
+```{r, echo=FALSE}
+#Customers with DSAN and only 1 server vs. customers with DSAN and multiple servers
+dsan2 = subset(dataset2, dataset2$dsan == 1)
+str(dsan2$dsan)
+mean(dsan2$support_volume)
+
+dsan3 = subset(dataset3, dataset3$dsan == 1)
+str(dsan3$dsan)
+mean(dsan3$support_volume)
+
+#------------------------------------------------------
+
+#Customers with DNAS and only 1 server vs. customers with DNAS and multiple servers
+dnas2 = subset(dataset2, dataset2$dnas == 1)
+str(dnas2$dnas)
+mean(dnas2$support_volume)
+
+dnas3 = subset(dataset3, dataset3$dnas == 1)
+str(dnas3$dnas)
+mean(dnas3$support_volume)
+```
+
+<p>Few customers have DSAN at all, but over 5 times as many customers that use DSAN have multiple servers rather than one server. Of those customers, mean support volume is almost 190 (the highest so far); over three times the required support for customers that use DSAN and have only one server.</p>
+
+<p>There are zero customers that have DNAS and only require one server; all of the nine customers that use DNAS have multiple servers. Of those customers, the mean support volume is 128 (surprisingly high).</p><br><br>
+
+###### Analysis of SAN and Routers
+
+```{r, echo=FALSE}
+#Customers with SAN and only 1 server vs. customers with SAN and multiple servers
+san2 = subset(dataset2, dataset1$san == 2)
+str(san2$san)
+mean(san2$support_volume)
+
+san3 = subset(dataset3, dataset3$san == 1)
+str(san3$san)
+mean(san3$support_volume)
+
+#------------------------------------------------------
+
+#Customers with router and only 1 server vs. customers with router and multiple servers
+router2 = subset(dataset2, dataset2$router == 1)
+str(router2$router)
+mean(router2$support_volume)
+
+router3 = subset(dataset3, dataset3$router == 1)
+str(router3$router)
+mean(router3$support_volume)
+
+dataset4 = subset(dataset1, dataset1$server_cnt < 1)
+mean(dataset4$support_volume)
+str(dataset4$support_volume)
+
+router4 = subset (dataset4, dataset4$router == 1)
+str(router4$support_volume)
+mean(router4$support_volume)
+```
+
+<p>All customers that use SAN have multiple servers, similar to DNAS. The mean support volume for SAN is 93.5. Out of the two subsets created, there was only one customer that had a router at all, and they used only one server. To make sure there were not customers that had a router but no servers, a third subset was made with customers that used 0 servers. Out of those customers, there were also no customers with routers. For the one customer with a router, the mean support volume was 18.</p><br><br>
+
+###### Analysis of Firewalls and Load Balancers
+
+```{r, echo=FALSE}
+#Customers with firewall and only 1 server vs. customers with firewall and multiple servers
+firewall2 = subset(dataset2, dataset2$firewall == 1)
+str(firewall2$firewall)
+mean(firewall2$support_volume)
+
+firewall3 = subset(dataset3, dataset3$firewall == 1)
+str(firewall3$firewall)
+mean(firewall3$support_volume)
+
+#------------------------------------------------------
+
+#Customers with lb and only 1 server vs. customers with lb and multiple servers
+lb2 = subset(dataset2, dataset2$lb == 1)
+str(lb2$lb)
+mean(lb2$support_volume)
+
+lb3 = subset(dataset3, dataset3$lb == 1)
+str(lb3$lb)
+mean(lb3$support_volume)
+```
+
+<p>The majority of customers that use firewalls have only one server (1912 vs. 907 customers with multiple servers). Of the customers with firewalls and only one server, the mean support volume is approximately half of those customers with firewalls and multiple servers: 36.1 compared to 76.4. There are no customers that have load balancers and only server; this makes sense considering what load balancers are used for. For the customers that do use load balancers with multiple servers, the mean support volume is 86.06.</p>
+
+<p>This preliminary search into the heaviest support volumes by single vs. multiple servers reveals interesting information. First, the most support-heavy products are DSAN and DNAS with averages of 190 and 128 respectively. Secondly, this shows that a customer with any platform will have a larger support volume if they use multiple servers rather than a single server. This relationship can be drastic in some instances; for customers with Linux or DSAN, having multiple servers can create up to three times the support volume or more than customers with that same platform but only one server!</p>
+
+<p>The next step in trying to determine which products drive more support is to create a linear model that identifies the variables which affect support volume the most.</p><br><br>
+
+
+##### Multiple Linear Regression Models 
+###### First model 
+```{r, echo=FALSE}
+#LINEAR MODELS
+volumelm = lm(dataset1$support_volume ~ windows_flag + linux_flag + virt + das + dsan + dnas + san + router + firewall + lb, data=dataset1)
+summary(volumelm)
+```
+
+<p>Based on this model, having a router is proven again to not affect support volume. A new linear model must be made that removes this irrelevant product.</p><br>
+
+###### Second model 
+```{r, echo=FALSE}
+#Regression model without router (not significant)
+volumelm2 = lm(dataset1$support_volume ~ windows_flag + linux_flag + virt + das + dsan + dnas + san + firewall + lb, data=dataset1)
+summary(volumelm2)
+```
+
+<p>All of the products in this new linear model have p-values under .001, meaning they all affect support volume. Of these products, DSAN and DNAS have the most effect on support volume. However, this linear model is not valid if it does not fulfill the basic assumptions that all linear models make about the data used.</p> <br>
+
+
+##### Testing assumptions for multiple linear regression models
+
+<p>The first assumption to check is the assumption of linearity.</p>
+
+```{r, echo=FALSE}
+#Assumptions
+#Linearity
+plot(volumelm2)
+#Bad, there are clusters in the residuals vs. predicted plot
+```
+<br>
+<p>The residuals vs. predicted plot show that there are indeed clusters of residuals, which means that the data is not appropriately linear. The next assumption is the normality of errors assumption, which requires that the error values follow a normal distribution.</p><br><br><br>
+
+```{r, echo=FALSE}
+#Normality of Errors: Q-Q Plot
+plot(volumelm2)
+#Lots of outliers still, not very normal
+```
+<br>
+<p>The Q-Q plot here includes many outliers which prevent the error values from following a normal distribution. Once again, this assumption is proven false. Next is the assumption of homoscedasticity, or the assumption that the dependent variables have similar amounts of variance for the range of values in the independent variable.</p><br><br>
+
+```{r, echo=FALSE}
+#Homoscedasticity: residual vs. predicted, NO PATTERNS
+plot(volumelm2)
+#values expand across x-axis, not good
+```
+<br>
+<p>For this assumption, there should be no patterns on the residual vs. predicted plot. However, the values clearly expand across the x-axis on this plot, which means that there are not similar amounts of variance for all the values of support volume. Finally, the last assumption is the independence of errors, which requires that it is impossible to predict the residuals of any observation compared to other observations.</p><br><br><br>
+
+```{r, echo=FALSE}
+#Independence of Errors: residual plot, NO CLUSTERS
+plot(volumelm2)
+dwt(volumelm2$residuals)
+#clusters, and lots of positive autocorrelation of residuals = not good
+```
+
+<p>Based on the Durbin-Watson Test and the residual plot, there is a positive autocorrelation of the residuals. Since the Durbin-Watson Test is between 0 and 4 and the result of the test is 0.26, this indicates strong positive autocorrelation. There is also clusters found in the residual plot which indicates autocorrelation of the residuals. Because the assumptions for linear modeling are not supported, it is not appropriate to use this method to determine which products drive more support. Instead, regression forests will be used to create a better representation of the relationship between all of Rackspace's products and customer support volume.</p><br><br><br>
+
+##### Regression Forests
+
+###### First regression forest
+<p>The first regression forest will incorporate all products, after which analysis can be made about which products are necessary in the analysis.</p>
+
+```{r, echo=FALSE}
+
+set.seed(123456)
+#All products
+forest=randomForest(support_volume ~ windows_flag + linux_flag + virt + das + dsan + dnas + san + router + firewall + lb, data=dataset1, ntrees="1500")
+forest$importance
+forest$importanceSD
+print(forest) #var = 38.39
+importance(forest)
+```
+
+<p>The first regression forest reiterates what was found earlier: the router is not a significant product when observing support volume. For the first forest, the total variance explained by the different dependent variables is 38.39%. In the second regression forest without the router, hopefully that variance will be higher.</p>
+
+###### Second regression forest
+
+```{r, echo=FALSE}
+#No router (best model)
+forest2=randomForest(support_volume ~ windows_flag + linux_flag + virt + das + dsan + dnas + san + firewall + lb, data=dataset1, ntrees="1500")
+print(forest2) #var = 38.84
+importance(forest2)
+```
+
+<p>This model has a slightly higher explained variance at 38.84%. Now, the product that has the smallest IncNodePurity is DNAS, the other product was consistently insignificant besides the router. Two more regression forests will be tested, one without the router and DNAS and one without DNAS only.</p>
+
+###### Third and fourth regression forest
+```{r, echo=FALSE}
+#No router, no dnas
+forest3=randomForest(support_volume ~  windows_flag + linux_flag + virt + das + dsan + san + firewall + lb, data=dataset1, ntrees="1500")
+print(forest3) #var = 37.59
+importance(forest3)
+
+#No dnas
+forest4=randomForest(support_volume ~  router + windows_flag + linux_flag + virt + das + dsan + san + firewall + lb, data=dataset1, ntrees="1500")
+print(forest4) #var = 38.51
+importance(forest4)
+```
+
+<p>Unfortunately, the previous two models do not achieve a higher variance; the first model reaches 37.59, and the second reaches 38.51. This means that the forest with the highest total variance explained is that without the router included. However, this explained variance of 38.84% is not particularly high.</p> 
+
+<p>What the second regression forest identifies is particularly interesting, since it contradicts what prior tests have shown. While the comparison of products between single and multiple servers and the linear regression model both found that the highest support volume came from customers with DNAS and DSAN, this regression forest identifies that the two products that actually have the strongest relationship with support volume are virtualization and firewalls! This indicates that in fact, customers that use virtualization or firewalls tend to need higher volumes of support from Rackspace. It is also important to note that routers were consistently found to not be significant across all tests, and DNAS was found to have only a small influence on consumer support based on the regression forest performed (this contradicts previous findings that indicated DNAS was in fact important).</p> 
+
+
+
+
+
+
+
+
+
